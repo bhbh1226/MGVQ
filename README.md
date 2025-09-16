@@ -15,7 +15,8 @@
 
 
 ## 🚀News
-- ```[August 2025]``` Achieve SOTA at paperwithcode leaderboards: Image Reconstruction on ImageNet and UHDBench. <image src="./assets/SOTA_recon_fid_imagenet_badge.jpg"/> <image src="./assets/SOTA_recon_PSNR_UHD_badge.jpg"/>
+- ```[September 2025]``` Achieve **SOTA** at [TokBench](https://wjf5203.github.io/TokBench/home_page.html) image reconstruction leaderboards: **Beat VAEs** (VA-VAE, SD-3.5, SD-XL, and FLUX.1-dev) on multiple resolutions(256p, 512p, and 1024p) on Text-Accuracy, Text-NED, and Face-Similarity metrics.
+- ```[August 2025]``` Achieve **SOTA** at paperwithcode leaderboards: Image Reconstruction on ImageNet and UHDBench. <image src="./assets/SOTA_recon_fid_imagenet_badge.jpg"/> <image src="./assets/SOTA_recon_PSNR_UHD_badge.jpg"/>
 - ```[August 2025]``` Released Inference Code
 - ```[August 2025]``` Released [model zoo](https://huggingface.co/mkjia/MGVQ/tree/main).
 - ```[August 2025]``` Released dataset for ultra-high-definition image reconstruction evaluation. Our proposed super-resolution image reconstruction [UHDBench dataset](https://huggingface.co/datasets/mkjia/UHDBench/tree/main) is released.
@@ -96,7 +97,7 @@ python3 evaluator.py /path/to/your/VIRTUAL_imagenet256_labeled.npz /path/to/your
 
 <div align="center"><image src="./assets/recon_tab_3.jpg"/></image></div>
 
-- 🔥 Reconstruction evaluation on TokBench 256x256 resolution.
+- 🔥 Reconstruction evaluation on TokBench.
 
 | Method | Type  | Factor | T-ACC(small)↑ |T-ACC(mean)↑ |T-NED(small)↑ |T-NED(mean)↑ |F-Sim(small)↑ |F-sim(mean)↑ | 
 |--------|:-----:|:---:|:----:|:----:|:----:|:----:|:----:|:----:|
@@ -113,6 +114,7 @@ python3 evaluator.py /path/to/your/VIRTUAL_imagenet256_labeled.npz /path/to/your
 |  LlamaGen  | Discrete |  8  | 4.39  | 29.41  | 19.69 | 49.00 | 0.17 | 0.40 |
 |  OpenMagvit2  | Discrete |  8  | 9.33  | 40.24  | 30.82 | 59.97 | 0.23 | 0.48 |
 | SD-3.5 | Continuous | 8 | 36.26 | 67.04 | 59.04 | 80.58 | 0.43 | 0.70 |
+| FLEX.1-dev| Continuous | 8 | 50.69 | 75.91 | 70.70 | 86.42 | 0.52 | 0.76 |
 |   MGVQ | Discrete |  8  | **63.83**  | **82.65**  | **80.18** | **90.96** | **0.58** | **0.80** |
 
 
