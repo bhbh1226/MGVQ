@@ -1,29 +1,31 @@
 #!/usr/bin/env bash
 
 # ===== model zoo =====
-MODEL=mgvq-f16c32; CKPT="/path/to/mgvq-f16c32.pt"; DS_RATE=16
-# MODEL=mgvq-f8c32;  CKPT="/path/to/mgvq-f8c32.pt"; DS_RATE=8
-# MODEL=mgvq-f32c32; CKPT="/path/to/mgvq-f32c32.pt"; DS_RATE=32
+# 사용법: MODEL=my-model ./eval_recon.sh
+MODEL="${MODEL:-mgvq-f16c32}"
+CKPT="${CKPT:-/mgvq_f16c32_g8.pt}"
+DS_RATE="${DS_RATE:-16}"
 
 # ===== knobs =====
-CODEBOOK_SIZE=32768      # 16384 | 32768
-CODEBOOK_GROUPS=4        # 4 | 8
-GROUPS_TO_USE=4          # <= CODEBOOK_GROUPS
-DATASET=imagenet256p     # imagenet256p | UHDBench2k
-DATASET_ROOT="/path/to/dataset" # .../origin/val/ | .../UHDBench/
+CODEBOOK_SIZE="${CODEBOOK_SIZE:-16384}"      # 16384 | 32768
+CODEBOOK_GROUPS="${CODEBOOK_GROUPS:-8}"      # 4 | 8
+GROUPS_TO_USE="${GROUPS_TO_USE:-4}"          # <= CODEBOOK_GROUPS
+DATASET="${DATASET:-imagenet256p}"           # imagenet256p | UHDBench2k | dicom | dicom512
+DATASET_ROOT="${DATASET_ROOT:-/path/to/dataset}"      # space-separated multiple paths
 
-OUT="./eval_imgs"
+OUT="${OUT:-/path/to/results}"
+
+echo "Running with MODEL=$MODEL, CKPT=$CKPT ..."
 
 # for imagenet 256p reconstruction evaluation
 python eval_recon.py \
---vq-model "$MODEL" \
---vq-ckpt "$CKPT" \
---codebook-size "$CODEBOOK_SIZE" \
---codebook-groups "$CODEBOOK_GROUPS" \
---groups-to-use "$GROUPS_TO_USE" \
---eval-dataset "$DATASET" \
---ds-rate "$DS_RATE" \
---path-to-save "$OUT" \
---dataset-root "$DATASET_ROOT" \
---eval-fid
-
+  --vq-model "$MODEL" \
+  --vq-ckpt "$CKPT" \
+  --codebook-size "$CODEBOOK_SIZE" \
+  --codebook-groups "$CODEBOOK_GROUPS" \
+  --groups-to-use "$GROUPS_TO_USE" \
+  --eval-dataset "$DATASET" \
+  --ds-rate "$DS_RATE" \
+  --path-to-save "$OUT" \
+  --dataset-root $DATASET_ROOT \
+  --eval-fid

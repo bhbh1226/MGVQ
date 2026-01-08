@@ -30,7 +30,7 @@ parser.add_argument("--groups-to-use", type=int, default=4, help="codebook group
 parser.add_argument("--eval-dataset", type=str, default="imagenet256p", help="benchmark for evaluation")
 parser.add_argument("--ds-rate", type=int, default=16, help="downsample ratio")
 parser.add_argument("--path-to-save", type=str, default="./eval_imgs", help="path to save evaluation images")
-parser.add_argument("--dataset-root", type=str, default="/path/to/your/dataset", help="path to evaluation datasets")
+parser.add_argument("--dataset-root", type=str, nargs='+', default=["/path/to/your/dataset"], help="path(s) to evaluation datasets")
 parser.add_argument("--eval-fid", action='store_true', help="weither to save images and eval rfid")
 # DICOM 관련 arguments
 parser.add_argument("--dicom-window", type=str, default=None, 
@@ -75,50 +75,45 @@ lpips_mean = 0
 lmodel = LPIPS().cuda()
 img_path_data = []
 
+# DICOM 데이터셋 여부 확인
+is_dicom_dataset = args.eval_dataset in ["dicom", "dicom512"]
+
 if args.eval_dataset == "imagenet256p":
     test_res_w = 256
     test_res_h = 256
-    root_path = args.dataset_root # .../origin/val
-    for seq in tqdm(os.listdir(root_path)):
-        if os.path.isdir(os.path.join(root_path, seq)):
-            for img in os.listdir(os.path.join(root_path, seq)):
-                img_path_data.append(os.path.join(root_path, seq, img))
+    for root_path in args.dataset_root:  # .../origin/val
+        for seq in tqdm(os.listdir(root_path), desc=f"Loading from {root_path}"):
+            if os.path.isdir(os.path.join(root_path, seq)):
+                for img in os.listdir(os.path.join(root_path, seq)):
+                    img_path_data.append(os.path.join(root_path, seq, img))
 
 elif args.eval_dataset == "UHDBench2k":
     test_res_w = 2560
     test_res_h = 1440
-    json_path = os.path.join(args.dataset_root, 'UHDBench.json') # .../UHDBench
-    with open(json_path, 'r') as file:
-        json_data = json.load(file)
-    for seq in json_data:
-        for img in json_data[seq]:
-            img_path_data.append(os.path.join(args.dataset_root, img))
+    for root_path in args.dataset_root:  # .../UHDBench
+        json_path = os.path.join(root_path, 'UHDBench.json')
+        with open(json_path, 'r') as file:
+            json_data = json.load(file)
+        for seq in json_data:
+            for img in json_data[seq]:
+                img_path_data.append(os.path.join(root_path, img))
 
-elif args.eval_dataset == "dicom":
-    # DICOM 데이터셋: 지정된 해상도 또는 기본값 사용
-    test_res_w = 256
-    test_res_h = 256
+elif is_dicom_dataset:
+    if args.eval_dataset == "dicom":
+        # DICOM 데이터셋: 지정된 해상도 또는 기본값 사용
+        test_res_h = 256
+        test_res_w = 256
+    elif args.eval_dataset == "dicom512":
+        # DICOM 데이터셋 512x512
+        test_res_w = 512
+        test_res_h = 512
     if not check_pydicom_available():
         raise ImportError("DICOM 데이터셋을 사용하려면 pydicom을 설치해주세요: pip install pydicom")
-    dicom_files = collect_dicom_files(args.dataset_root, recursive=True)
-    for dcm_path in dicom_files:
-        img_path_data.append(str(dcm_path))
+    for root_path in args.dataset_root:
+        dicom_files = collect_dicom_files(root_path, recursive=True)
+        for dcm_path in dicom_files:
+            img_path_data.append(str(dcm_path))
     print(f"Found {len(dicom_files)} DICOM files")
-
-elif args.eval_dataset == "dicom512":
-    # DICOM 데이터셋 512x512
-    test_res_w = 512
-    test_res_h = 512
-    if not check_pydicom_available():
-        raise ImportError("DICOM 데이터셋을 사용하려면 pydicom을 설치해주세요: pip install pydicom")
-    dicom_files = collect_dicom_files(args.dataset_root, recursive=True)
-    for dcm_path in dicom_files:
-        img_path_data.append(str(dcm_path))
-    print(f"Found {len(dicom_files)} DICOM files")
-
-
-# DICOM 데이터셋 여부 확인
-is_dicom_dataset = args.eval_dataset in ["dicom", "dicom512"]
 
 length = len(img_path_data)
 print(f"len:{length}")
