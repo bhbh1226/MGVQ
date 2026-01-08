@@ -26,4 +26,4 @@ lvis
 scikit-image
 clean-fid
 
-
+pydicom

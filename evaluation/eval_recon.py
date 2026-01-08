@@ -13,6 +13,12 @@ from applications.tokenizer.lpips import LPIPS
 from PIL import Image
 from cleanfid import fid
 from eval_aug import resize_center_crop
+from dicom_utils import (
+    check_pydicom_available, 
+    resize_center_crop_dicom, 
+    collect_dicom_files,
+    HU_WINDOWS
+)
 # generate
 parser = argparse.ArgumentParser(description="")
 parser.add_argument("--vq-model", type=str, choices=['mgvq-f8c32', 'mgvq-f16c32', 'mgvq-f32c32'], default="mgvq-f16c32") 
@@ -26,6 +32,12 @@ parser.add_argument("--ds-rate", type=int, default=16, help="downsample ratio")
 parser.add_argument("--path-to-save", type=str, default="./eval_imgs", help="path to save evaluation images")
 parser.add_argument("--dataset-root", type=str, default="/path/to/your/dataset", help="path to evaluation datasets")
 parser.add_argument("--eval-fid", action='store_true', help="weither to save images and eval rfid")
+# DICOM 관련 arguments
+parser.add_argument("--dicom-window", type=str, default=None, 
+                    choices=list(HU_WINDOWS.keys()),
+                    help="HU window preset for DICOM (lung, soft_tissue, bone, brain, liver, mediastinum, abdomen, default)")
+parser.add_argument("--dicom-window-min", type=float, default=None, help="custom HU window min value")
+parser.add_argument("--dicom-window-max", type=float, default=None, help="custom HU window max value")
 
 args = parser.parse_args()
 
@@ -82,11 +94,47 @@ elif args.eval_dataset == "UHDBench2k":
         for img in json_data[seq]:
             img_path_data.append(os.path.join(args.dataset_root, img))
 
+elif args.eval_dataset == "dicom":
+    # DICOM 데이터셋: 지정된 해상도 또는 기본값 사용
+    test_res_w = 256
+    test_res_h = 256
+    if not check_pydicom_available():
+        raise ImportError("DICOM 데이터셋을 사용하려면 pydicom을 설치해주세요: pip install pydicom")
+    dicom_files = collect_dicom_files(args.dataset_root, recursive=True)
+    for dcm_path in dicom_files:
+        img_path_data.append(str(dcm_path))
+    print(f"Found {len(dicom_files)} DICOM files")
+
+elif args.eval_dataset == "dicom512":
+    # DICOM 데이터셋 512x512
+    test_res_w = 512
+    test_res_h = 512
+    if not check_pydicom_available():
+        raise ImportError("DICOM 데이터셋을 사용하려면 pydicom을 설치해주세요: pip install pydicom")
+    dicom_files = collect_dicom_files(args.dataset_root, recursive=True)
+    for dcm_path in dicom_files:
+        img_path_data.append(str(dcm_path))
+    print(f"Found {len(dicom_files)} DICOM files")
+
+
+# DICOM 데이터셋 여부 확인
+is_dicom_dataset = args.eval_dataset in ["dicom", "dicom512"]
 
 length = len(img_path_data)
 print(f"len:{length}")
 for i in tqdm(range(0, length)):
-    im = resize_center_crop(img_path_data[i], test_res_w, test_res_h)
+    # DICOM 파일인 경우 dicom_utils 사용
+    if is_dicom_dataset:
+        im = resize_center_crop_dicom(
+            img_path_data[i], 
+            test_res_w, 
+            test_res_h,
+            window_name=args.dicom_window,
+            window_min=args.dicom_window_min,
+            window_max=args.dicom_window_max
+        )
+    else:
+        im = resize_center_crop(img_path_data[i], test_res_w, test_res_h)
     h, w, _ = im.shape
     width = int( (w + ds_rate-1) // ds_rate)  * ds_rate
     height = int( (h + ds_rate-1) // ds_rate)  * ds_rate
