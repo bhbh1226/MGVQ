@@ -1,0 +1,79 @@
+# Slurm scheduler job scripts
+*.sbatch
+
+# Logs and Output directories
+/logs/
+/output/
+
+*.log
+*.out
+*.err
+
+# PyTorch Model Checkpoints & Weights (용량이 큼)
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# --- Python & Environment  ---
+# Byte-compiled / Optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+venv/
+.venv/
+env/
+.env
+
+# Distribution / Packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# --- Medical & Data  ---
+# Dataset directories
+/data/
+/dataset/
+/datasets/
+
+*.dcm
+*.nii
+*.nii.gz
+*.mhd
+*.raw
+*.nrrd
+*.npy
+*.npz
+*.jpg
+*.png
+*.tiff
+*.tif
+*.bmp
+
+# --- IDE & OS ---
+# VS Code
+.vscode/
+
+# PyCharm
+.idea/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# macOS / Windows system files
+.DS_Store
+Thumbs.db

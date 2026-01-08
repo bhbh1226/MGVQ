@@ -11,11 +11,12 @@ import numpy as np
 from skimage.metrics import structural_similarity as ssim
 from applications.tokenizer.lpips import LPIPS
 from PIL import Image
+from datetime import datetime
 from cleanfid import fid
-from eval_aug import resize_center_crop
+from eval_aug import resize_center_crop, resize_fit_pad, resize_stretch
 from dicom_utils import (
     check_pydicom_available, 
-    resize_center_crop_dicom, 
+    read_dicom_as_pil, 
     collect_dicom_files,
     HU_WINDOWS
 )
@@ -38,6 +39,9 @@ parser.add_argument("--dicom-window", type=str, default=None,
                     help="HU window preset for DICOM (lung, soft_tissue, bone, brain, liver, mediastinum, abdomen, default)")
 parser.add_argument("--dicom-window-min", type=float, default=None, help="custom HU window min value")
 parser.add_argument("--dicom-window-max", type=float, default=None, help="custom HU window max value")
+parser.add_argument("--dicom-no-windowing", action='store_true', help="disable HU windowing for DICOM (use raw pixel values)")
+parser.add_argument("--resize-mode", type=str, choices=['center_crop', 'fit_pad', 'stretch'], default='center_crop',
+                    help="resize mode: center_crop (crop longer side), fit_pad (pad shorter side), or stretch (ignore aspect ratio)")
 
 args = parser.parse_args()
 
@@ -53,8 +57,9 @@ def load_vqgan(args):
 
 ds_rate = args.ds_rate
 dir_name = args.vq_ckpt.split('/')[-1].split('.')[-2]
-gt_dir = os.path.join(args.path_to_save, f'gt/{args.eval_dataset}_imgs')
-fake_dir = os.path.join(args.path_to_save, f'{dir_name}/{args.eval_dataset}_imgs')
+save_root = os.path.join(args.path_to_save, datetime.now().strftime('%Y%m%d_%H%M%S'))
+gt_dir = os.path.join(save_root, f'gt')
+fake_dir = os.path.join(save_root, f'fake')
 if args.eval_fid:
     save_gt_imgs = True
     save_fake_imgs = True
@@ -74,6 +79,12 @@ ssim_mean = 0
 lpips_mean = 0
 lmodel = LPIPS().cuda()
 img_path_data = []
+
+for dataset_root in args.dataset_root:
+    if not os.path.exists(dataset_root):
+        raise FileNotFoundError(f"Dataset root path does not exist: {dataset_root}")
+    else:
+        print(f"Using dataset root path: {dataset_root}")
 
 # DICOM 데이터셋 여부 확인
 is_dicom_dataset = args.eval_dataset in ["dicom", "dicom512"]
@@ -113,32 +124,48 @@ elif is_dicom_dataset:
         dicom_files = collect_dicom_files(root_path, recursive=True)
         for dcm_path in dicom_files:
             img_path_data.append(str(dcm_path))
-    print(f"Found {len(dicom_files)} DICOM files")
+    print(f"Found {len(img_path_data)} DICOM files")
 
 length = len(img_path_data)
 print(f"len:{length}")
+
+# resize 함수 선택
+print(f"Using resize mode: {args.resize_mode}")
+if args.resize_mode == 'center_crop':
+    resize_func = resize_center_crop
+elif args.resize_mode == 'fit_pad':
+    resize_func = resize_fit_pad
+else:  # stretch
+    resize_func = resize_stretch
+
 for i in tqdm(range(0, length)):
-    # DICOM 파일인 경우 dicom_utils 사용
+    # DICOM 파일인 경우 PIL로 먼저 변환
     if is_dicom_dataset:
-        im = resize_center_crop_dicom(
-            img_path_data[i], 
-            test_res_w, 
-            test_res_h,
+        im_pil = read_dicom_as_pil(
+            img_path_data[i],
             window_name=args.dicom_window,
             window_min=args.dicom_window_min,
-            window_max=args.dicom_window_max
+            window_max=args.dicom_window_max,
+            apply_windowing=not args.dicom_no_windowing,
         )
+        im = resize_func(im_pil, test_res_w, test_res_h)
     else:
-        im = resize_center_crop(img_path_data[i], test_res_w, test_res_h)
+        im = resize_func(img_path_data[i], test_res_w, test_res_h)
     h, w, _ = im.shape
     width = int( (w + ds_rate-1) // ds_rate)  * ds_rate
     height = int( (h + ds_rate-1) // ds_rate)  * ds_rate
 
+    # 파일명 및 하위 폴더 구조 추출 (save_gt_imgs, save_fake_imgs 둘 다에서 사용)
+    save_path_img = img_path_data[i].split('/')[-1]
+    save_path_name = save_path_img.split('.')[0]
+    # sub_dirs = img_path_data[i].split('/')[-4:-1]  # 뒤에서 3개 폴더 (예: train/vnc_wi/001)
+    
     if save_gt_imgs:
-        save_path_img = img_path_data[i].split('/')[-1]
-        save_path_name = save_path_img.split('.')[0]
+        save_dir_gt = os.path.join(gt_dir)
+        # save_dir_gt = os.path.join(gt_dir, *sub_dirs)
+        os.makedirs(save_dir_gt, exist_ok=True)
         im_pil = Image.fromarray(im)
-        im_pil.save(os.path.join(gt_dir, f'{i}_{save_path_name}.png'))
+        im_pil.save(os.path.join(save_dir_gt, f'{save_path_name}.png'))
     
     im_tensor = (torch.from_numpy(im.copy()).permute(2, 0, 1).unsqueeze(0).cuda()/255.-0.5)*2
 
@@ -160,10 +187,13 @@ for i in tqdm(range(0, length)):
     lpips_mean += tmp_lpips
 
     if save_fake_imgs:
+        save_dir_fake = os.path.join(fake_dir)
+        # save_dir_fake = os.path.join(fake_dir, *sub_dirs)
+        os.makedirs(save_dir_fake, exist_ok=True)
         image = (image / 2 + 0.5).clip(0, 1) 
         im = (image[0].permute(1, 2, 0).detach().cpu().numpy() * 255).astype('uint8')
         im_pil = Image.fromarray(im)
-        im_pil.save(os.path.join(fake_dir, f'{i}_{save_path_name}.png'))
+        im_pil.save(os.path.join(save_dir_fake, f'{save_path_name}.png'))
 
 mse_mean /= length
 ssim_mean /= length

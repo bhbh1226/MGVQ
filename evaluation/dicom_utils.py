@@ -10,6 +10,7 @@ DICOM 이미지 읽기 유틸리티
 from pathlib import Path
 from typing import Tuple, Optional, Union, List
 import numpy as np
+from PIL import Image
 
 try:
     import pydicom
@@ -28,7 +29,6 @@ HU_WINDOWS = {
     "liver": (-20, 200),
     "mediastinum": (-125, 225),
     "abdomen": (-125, 225),
-    "default": (-1000, 1000),
 }
 
 
@@ -92,6 +92,7 @@ def read_dicom_as_rgb(
     window_name: Optional[str] = None,
     window_min: Optional[float] = None,
     window_max: Optional[float] = None,
+    apply_windowing: bool = True,
 ) -> np.ndarray:
     """DICOM 파일을 RGB 이미지로 읽기
     
@@ -100,6 +101,7 @@ def read_dicom_as_rgb(
         window_name: 사전 정의된 window 이름 (window_min/max 미지정시 사용)
         window_min: 최소 HU 값 (직접 지정)
         window_max: 최대 HU 값 (직접 지정)
+        apply_windowing: True이면 windowing 적용, False이면 원본 HU 값 사용
         
     Returns:
         RGB 이미지 numpy 배열 (H, W, 3), uint8
@@ -124,98 +126,61 @@ def read_dicom_as_rgb(
     # HU 변환 적용
     hu_array = apply_hu_transform_single(ds)
     
-    # Window/Level 결정
-    if window_min is None or window_max is None:
-        # DICOM 헤더에서 window 정보 시도
-        if hasattr(ds, 'WindowCenter') and hasattr(ds, 'WindowWidth'):
-            wc = ds.WindowCenter
-            ww = ds.WindowWidth
-            # 다중 window인 경우 첫 번째 사용
-            if isinstance(wc, pydicom.multival.MultiValue):
-                wc = float(wc[0])
-            else:
-                wc = float(wc)
-            if isinstance(ww, pydicom.multival.MultiValue):
-                ww = float(ww[0])
-            else:
-                ww = float(ww)
+    window_min = hu_array.min()
+    window_max = hu_array.max()
+
+    if not apply_windowing:
+        if window_min is not None and window_max is not None:
+            pass
+
+        elif hasattr(ds, 'WindowCenter') and hasattr(ds, 'WindowWidth'):
+            def get_val(val):
+                return float(val[0]) if isinstance(val, pydicom.multival.MultiValue) else float(val)
+
+            wc = get_val(ds.WindowCenter)
+            ww = get_val(ds.WindowWidth)
+            
             window_min = wc - ww / 2
             window_max = wc + ww / 2
+
         elif window_name:
             window_min, window_max = get_hu_window(window_name)
-        else:
-            # 기본값 사용
-            window_min, window_max = get_hu_window("default")
-    
-    # Window 적용
+
     gray_array = apply_window_level(hu_array, window_min, window_max)
-    
-    # RGB로 변환 (grayscale -> RGB)
+        
     rgb_array = np.stack([gray_array, gray_array, gray_array], axis=-1)
     
     return rgb_array
 
-
-def resize_center_crop_dicom(
+def read_dicom_as_pil(
     dicom_path: Union[str, Path],
-    target_width: int,
-    target_height: int,
     window_name: Optional[str] = None,
     window_min: Optional[float] = None,
     window_max: Optional[float] = None,
-) -> np.ndarray:
-    """DICOM 파일을 읽고 resize 및 center crop 적용
-    
-    eval_aug.py의 resize_center_crop과 동일한 로직을 DICOM에 적용
+    apply_windowing: bool = True,
+) -> Image.Image:
+    """DICOM 파일을 PIL Image로 읽기
     
     Args:
         dicom_path: DICOM 파일 경로
-        target_width: 목표 너비
-        target_height: 목표 높이
-        window_name: HU window 이름
-        window_min: 최소 HU 값
-        window_max: 최대 HU 값
+        window_name: 사전 정의된 window 이름
+        window_min: 최소 HU 값 (직접 지정)
+        window_max: 최대 HU 값 (직접 지정)
+        apply_windowing: True이면 windowing 적용, False이면 원본 HU 값 사용
         
     Returns:
-        center crop된 RGB 이미지 numpy 배열 (H, W, 3), uint8
+        PIL Image 객체 (RGB)
     """
-    from PIL import Image
     
-    # DICOM을 RGB로 읽기
     rgb_array = read_dicom_as_rgb(
         dicom_path, 
         window_name=window_name,
         window_min=window_min, 
-        window_max=window_max
+        window_max=window_max,
+        apply_windowing=apply_windowing,
     )
     
-    # PIL Image로 변환
-    im_pil = Image.fromarray(rgb_array)
-    w, h = im_pil.size
-    
-    # resize to eval_res
-    scale = target_width / target_height
-    scale_im = w / h
-    
-    if scale_im < scale:
-        h_1 = round(h / w * target_width) 
-        im = np.array(im_pil.resize((target_width, h_1), resample=Image.BICUBIC))
-    else:
-        w_1 = round(w / h * target_height) 
-        im = np.array(im_pil.resize((w_1, target_height), resample=Image.BICUBIC)) 
-    
-    # center crop
-    ih, iw, _ = im.shape
-    if iw == target_width:
-        x = int(ih / 2 - target_height / 2)
-        y = 0
-        im = im[x:x+target_height, y:y+target_width, :]
-    else:  # ih == target_height
-        x = 0
-        y = int(iw / 2 - target_width / 2)
-        im = im[x:x+target_height, y:y+target_width, :]
-    
-    return im
+    return Image.fromarray(rgb_array)
 
 
 def collect_dicom_files(root_path: Union[str, Path], recursive: bool = True) -> List[Path]:

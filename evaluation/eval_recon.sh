@@ -15,6 +15,8 @@ DATASET_ROOT="${DATASET_ROOT:-/path/to/dataset}"      # space-separated multiple
 
 OUT="${OUT:-/path/to/results}"
 
+RESIZE_MODE="${RESIZE_MODE:-center_crop}"  # center_crop | fit_pad | stretch
+
 echo "Running with MODEL=$MODEL, CKPT=$CKPT ..."
 
 # for imagenet 256p reconstruction evaluation
@@ -28,4 +30,6 @@ python eval_recon.py \
   --ds-rate "$DS_RATE" \
   --path-to-save "$OUT" \
   --dataset-root $DATASET_ROOT \
+  --resize-mode "$RESIZE_MODE" \
+  --dicom-no-windowing \
   --eval-fid
