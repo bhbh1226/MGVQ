@@ -20,6 +20,17 @@ from dicom_utils import (
     collect_dicom_files,
     HU_WINDOWS
 )
+from nifti_utils import (
+    check_nibabel_available,
+    check_torch_available,
+    read_nifti_slice_as_pil,
+    read_tensor_slice_as_pil,
+    collect_nifti_files,
+    collect_tensor_files,
+    load_nifti_volume,
+    load_tensor_volume,
+    HU_WINDOWS as NIFTI_HU_WINDOWS
+)
 # generate
 parser = argparse.ArgumentParser(description="")
 parser.add_argument("--vq-model", type=str, choices=['mgvq-f8c32', 'mgvq-f16c32', 'mgvq-f32c32'], default="mgvq-f16c32") 
@@ -40,6 +51,18 @@ parser.add_argument("--dicom-window", type=str, default=None,
 parser.add_argument("--dicom-window-min", type=float, default=None, help="custom HU window min value")
 parser.add_argument("--dicom-window-max", type=float, default=None, help="custom HU window max value")
 parser.add_argument("--dicom-no-windowing", action='store_true', help="disable HU windowing for DICOM (use raw pixel values)")
+# NIfTI/Tensor 관련 arguments
+parser.add_argument("--slice-axis", type=int, default=1, choices=[0, 1, 2],
+                    help="slice axis for volumetric data: 0=sagittal, 1=coronal, 2=axial (default: 1)")
+parser.add_argument("--slice-idx", type=int, default=None,
+                    help="specific slice index to use (default: None = use all slices)")
+parser.add_argument("--slice-range", type=str, default=None,
+                    help="slice range to use, format: 'start:end' or 'start:end:step' (e.g., '50:150' or '50:150:2')")
+parser.add_argument("--hu-window", type=str, default=None, 
+                    choices=list(HU_WINDOWS.keys()),
+                    help="HU window preset for NIfTI/Tensor (lung, soft_tissue, bone, brain, liver, mediastinum, abdomen)")
+parser.add_argument("--hu-window-min", type=float, default=None, help="custom HU window min value for NIfTI/Tensor")
+parser.add_argument("--hu-window-max", type=float, default=None, help="custom HU window max value for NIfTI/Tensor")
 parser.add_argument("--resize-mode", type=str, choices=['center_crop', 'fit_pad', 'stretch'], default='center_crop',
                     help="resize mode: center_crop (crop longer side), fit_pad (pad shorter side), or stretch (ignore aspect ratio)")
 
@@ -86,8 +109,22 @@ for dataset_root in args.dataset_root:
     else:
         print(f"Using dataset root path: {dataset_root}")
 
-# DICOM 데이터셋 여부 확인
+# 데이터셋 유형 확인
 is_dicom_dataset = args.eval_dataset in ["dicom", "dicom512"]
+is_nifti_dataset = args.eval_dataset in ["nifti", "nifti256", "nifti512"]
+is_tensor_dataset = args.eval_dataset in ["tensor", "tensor256", "tensor512"]
+is_volumetric_dataset = is_nifti_dataset or is_tensor_dataset
+
+# 슬라이스 범위 파싱
+slice_range = None
+if args.slice_range:
+    parts = args.slice_range.split(':')
+    if len(parts) == 2:
+        slice_range = (int(parts[0]), int(parts[1]), 1)
+    elif len(parts) == 3:
+        slice_range = (int(parts[0]), int(parts[1]), int(parts[2]))
+    else:
+        raise ValueError(f"Invalid slice_range format: {args.slice_range}. Use 'start:end' or 'start:end:step'")
 
 if args.eval_dataset == "imagenet256p":
     test_res_w = 256
@@ -126,6 +163,80 @@ elif is_dicom_dataset:
             img_path_data.append(str(dcm_path))
     print(f"Found {len(img_path_data)} DICOM files")
 
+elif is_nifti_dataset:
+    # NIfTI 데이터셋
+    if args.eval_dataset in ["nifti", "nifti256"]:
+        test_res_h = 256
+        test_res_w = 256
+    elif args.eval_dataset == "nifti512":
+        test_res_w = 512
+        test_res_h = 512
+    if not check_nibabel_available():
+        raise ImportError("NIfTI 데이터셋을 사용하려면 nibabel을 설치해주세요: pip install nibabel")
+    
+    # NIfTI 파일 수집 및 슬라이스 정보 저장
+    nifti_slice_data = []  # (file_path, slice_idx) 튜플 리스트
+    for root_path in args.dataset_root:
+        nifti_files = collect_nifti_files(root_path, recursive=True)
+        for nifti_path in nifti_files:
+            volume, _ = load_nifti_volume(nifti_path)
+            num_slices = volume.shape[args.slice_axis]
+            
+            if args.slice_idx is not None:
+                # 특정 슬라이스만 사용
+                slice_indices = [args.slice_idx]
+            elif slice_range:
+                # 슬라이스 범위 사용
+                start, end, step = slice_range
+                slice_indices = list(range(max(0, start), min(num_slices, end), step))
+            else:
+                # 모든 슬라이스 사용
+                slice_indices = list(range(num_slices))
+            
+            for s_idx in slice_indices:
+                if 0 <= s_idx < num_slices:
+                    nifti_slice_data.append((str(nifti_path), s_idx))
+    
+    img_path_data = nifti_slice_data
+    print(f"Found {len(collect_nifti_files(args.dataset_root[0], recursive=True))} NIfTI files, {len(img_path_data)} slices total")
+
+elif is_tensor_dataset:
+    # Tensor 데이터셋
+    if args.eval_dataset in ["tensor", "tensor256"]:
+        test_res_h = 256
+        test_res_w = 256
+    elif args.eval_dataset == "tensor512":
+        test_res_w = 512
+        test_res_h = 512
+    if not check_torch_available():
+        raise ImportError("Tensor 데이터셋을 사용하려면 torch가 설치되어 있어야 합니다.")
+    
+    # Tensor 파일 수집 및 슬라이스 정보 저장
+    tensor_slice_data = []  # (file_path, slice_idx) 튜플 리스트
+    for root_path in args.dataset_root:
+        tensor_files = collect_tensor_files(root_path, recursive=True)
+        for tensor_path in tensor_files:
+            volume, _ = load_tensor_volume(tensor_path)
+            num_slices = volume.shape[args.slice_axis]
+            
+            if args.slice_idx is not None:
+                # 특정 슬라이스만 사용
+                slice_indices = [args.slice_idx]
+            elif slice_range:
+                # 슬라이스 범위 사용
+                start, end, step = slice_range
+                slice_indices = list(range(max(0, start), min(num_slices, end), step))
+            else:
+                # 모든 슬라이스 사용
+                slice_indices = list(range(num_slices))
+            
+            for s_idx in slice_indices:
+                if 0 <= s_idx < num_slices:
+                    tensor_slice_data.append((str(tensor_path), s_idx))
+    
+    img_path_data = tensor_slice_data
+    print(f"Found {len(collect_tensor_files(args.dataset_root[0], recursive=True))} Tensor files, {len(img_path_data)} slices total")
+
 length = len(img_path_data)
 print(f"len:{length}")
 
@@ -139,8 +250,9 @@ else:  # stretch
     resize_func = resize_stretch
 
 for i in tqdm(range(0, length)):
-    # DICOM 파일인 경우 PIL로 먼저 변환
+    # 데이터 유형에 따른 이미지 로드
     if is_dicom_dataset:
+        # DICOM 파일
         im_pil = read_dicom_as_pil(
             img_path_data[i],
             window_name=args.dicom_window,
@@ -149,17 +261,57 @@ for i in tqdm(range(0, length)):
             apply_windowing=not args.dicom_no_windowing,
         )
         im = resize_func(im_pil, test_res_w, test_res_h)
+        current_file_path = img_path_data[i]
+    elif is_nifti_dataset:
+        # NIfTI 파일 - (file_path, slice_idx) 튜플
+        file_path, slice_idx = img_path_data[i]
+        im_pil = read_nifti_slice_as_pil(
+            file_path,
+            slice_idx=slice_idx,
+            axis=args.slice_axis,
+            window_name=args.hu_window,
+            window_min=args.hu_window_min,
+            window_max=args.hu_window_max,
+            apply_windowing=True,
+        )
+        im = resize_func(im_pil, test_res_w, test_res_h)
+        current_file_path = file_path
+    elif is_tensor_dataset:
+        # Tensor 파일 - (file_path, slice_idx) 튜플
+        file_path, slice_idx = img_path_data[i]
+        im_pil = read_tensor_slice_as_pil(
+            file_path,
+            slice_idx=slice_idx,
+            axis=args.slice_axis,
+            window_name=args.hu_window,
+            window_min=args.hu_window_min,
+            window_max=args.hu_window_max,
+            apply_windowing=True,
+        )
+        im = resize_func(im_pil, test_res_w, test_res_h)
+        current_file_path = file_path
     else:
+        # 일반 이미지 파일
         im = resize_func(img_path_data[i], test_res_w, test_res_h)
+        current_file_path = img_path_data[i]
+    
     h, w, _ = im.shape
     width = int( (w + ds_rate-1) // ds_rate)  * ds_rate
     height = int( (h + ds_rate-1) // ds_rate)  * ds_rate
 
     # 파일명 및 하위 폴더 구조 추출 (save_gt_imgs, save_fake_imgs 둘 다에서 사용)
-    save_path_img = img_path_data[i].split('/')[-1]
-    save_path_name = save_path_img.split('.')[0]
-    sub_dirs = img_path_data[i].split('/')[-4:-2] # Dataset subset (예: train/vnc_wi)
-    sub_patient = img_path_data[i].split('/')[-2] # Patient 번호 (예: 001)
+    if is_volumetric_dataset:
+        # NIfTI/Tensor: 슬라이스 인덱스를 파일명에 포함
+        file_path, slice_idx = img_path_data[i]
+        base_name = os.path.basename(file_path).split('.')[0]
+        save_path_name = f"{base_name}_slice{slice_idx:04d}"
+        sub_dirs = file_path.split('/')[-4:-2]  # Dataset subset (예: train/vnc_wi)
+        sub_patient = file_path.split('/')[-2]  # Patient 번호 (예: 001)
+    else:
+        save_path_img = current_file_path.split('/')[-1]
+        save_path_name = save_path_img.split('.')[0]
+        sub_dirs = current_file_path.split('/')[-4:-2]  # Dataset subset (예: train/vnc_wi)
+        sub_patient = current_file_path.split('/')[-2]  # Patient 번호 (예: 001)
     
     if save_gt_imgs:
         save_dir_gt = os.path.join(gt_dir, *sub_dirs, sub_patient)
