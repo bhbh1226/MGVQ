@@ -27,3 +27,4 @@ scikit-image
 clean-fid
 
 pydicom
+monai
