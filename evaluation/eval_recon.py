@@ -50,7 +50,7 @@ parser.add_argument("--dicom-window", type=str, default=None,
                     help="HU window preset for DICOM (lung, soft_tissue, bone, brain, liver, mediastinum, abdomen, default)")
 parser.add_argument("--dicom-window-min", type=float, default=None, help="custom HU window min value")
 parser.add_argument("--dicom-window-max", type=float, default=None, help="custom HU window max value")
-parser.add_argument("--dicom-no-windowing", action='store_true', help="disable HU windowing for DICOM (use raw pixel values)")
+parser.add_argument("--no-windowing", action='store_true', help="disable HU windowing for DICOM, NIfTI, Tensor (use raw pixel values)")
 # NIfTI/Tensor 관련 arguments
 parser.add_argument("--slice-axis", type=int, default=1, choices=[0, 1, 2],
                     help="slice axis for volumetric data: 0=sagittal, 1=coronal, 2=axial (default: 1)")
@@ -258,7 +258,7 @@ for i in tqdm(range(0, length)):
             window_name=args.dicom_window,
             window_min=args.dicom_window_min,
             window_max=args.dicom_window_max,
-            apply_windowing=not args.dicom_no_windowing,
+            apply_windowing=not args.no_windowing,
         )
         im = resize_func(im_pil, test_res_w, test_res_h)
         current_file_path = img_path_data[i]
@@ -272,7 +272,7 @@ for i in tqdm(range(0, length)):
             window_name=args.hu_window,
             window_min=args.hu_window_min,
             window_max=args.hu_window_max,
-            apply_windowing=True,
+            apply_windowing=not args.no_windowing,
         )
         im = resize_func(im_pil, test_res_w, test_res_h)
         current_file_path = file_path
