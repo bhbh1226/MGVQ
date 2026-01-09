@@ -158,11 +158,11 @@ for i in tqdm(range(0, length)):
     # 파일명 및 하위 폴더 구조 추출 (save_gt_imgs, save_fake_imgs 둘 다에서 사용)
     save_path_img = img_path_data[i].split('/')[-1]
     save_path_name = save_path_img.split('.')[0]
-    # sub_dirs = img_path_data[i].split('/')[-4:-1]  # 뒤에서 3개 폴더 (예: train/vnc_wi/001)
+    sub_dirs = img_path_data[i].split('/')[-4:-2] # Dataset subset (예: train/vnc_wi)
+    sub_patient = img_path_data[i].split('/')[-2] # Patient 번호 (예: 001)
     
     if save_gt_imgs:
-        save_dir_gt = os.path.join(gt_dir)
-        # save_dir_gt = os.path.join(gt_dir, *sub_dirs)
+        save_dir_gt = os.path.join(gt_dir, *sub_dirs, sub_patient)
         os.makedirs(save_dir_gt, exist_ok=True)
         im_pil = Image.fromarray(im)
         im_pil.save(os.path.join(save_dir_gt, f'{save_path_name}.png'))
@@ -187,8 +187,7 @@ for i in tqdm(range(0, length)):
     lpips_mean += tmp_lpips
 
     if save_fake_imgs:
-        save_dir_fake = os.path.join(fake_dir)
-        # save_dir_fake = os.path.join(fake_dir, *sub_dirs)
+        save_dir_fake = os.path.join(fake_dir, *sub_dirs, sub_patient)
         os.makedirs(save_dir_fake, exist_ok=True)
         image = (image / 2 + 0.5).clip(0, 1) 
         im = (image[0].permute(1, 2, 0).detach().cpu().numpy() * 255).astype('uint8')
