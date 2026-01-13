@@ -421,7 +421,6 @@ class MGVQ(nn.Module):
 
     def load_model(self):
         if self.cfg.pretrained_source == "mgvq":
-            torch.serialization.add_safe_globals([argparse.Namespace])
             state_dict = torch.load(self.cfg.pretrained_path, map_location="cpu", weights_only=True)["state_dict"]
             self.load_state_dict(state_dict)
         else:

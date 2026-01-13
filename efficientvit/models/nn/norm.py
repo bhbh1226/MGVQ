@@ -1,13 +1,31 @@
 from typing import Optional
+import os
 
 import torch
 import torch.nn as nn
 from torch.nn.modules.batchnorm import _BatchNorm
 
-from efficientvit.models.nn.triton_rms_norm import TritonRMSNorm2dFunc
 from efficientvit.models.utils import build_kwargs_from_config
 
-__all__ = ["LayerNorm2d", "TritonRMSNorm2d", "build_norm", "reset_bn", "set_norm_eps"]
+__all__ = ["LayerNorm2d", "TritonRMSNorm2d", "RMSNorm2d", "build_norm", "reset_bn", "set_norm_eps"]
+
+# Triton 사용 가능 여부 확인 (환경변수로 강제 비활성화 가능)
+TRITON_AVAILABLE = False
+if os.environ.get("DISABLE_TRITON", "0") != "1":
+    try:
+        from efficientvit.models.nn.triton_rms_norm import TritonRMSNorm2dFunc
+        # 실제로 Triton이 작동하는지 테스트
+        _test_tensor = torch.randn(1, 4, 2, 2, device='cuda' if torch.cuda.is_available() else 'cpu')
+        _test_weight = torch.ones(4, device=_test_tensor.device)
+        _test_bias = torch.zeros(4, device=_test_tensor.device)
+        _ = TritonRMSNorm2dFunc.apply(_test_tensor, _test_weight, _test_bias, 1e-6)
+        TRITON_AVAILABLE = True
+        print("[norm.py] Triton RMSNorm2d is available and working.")
+    except Exception as e:
+        print(f"[norm.py] Triton not available, using PyTorch fallback. Reason: {type(e).__name__}")
+        TRITON_AVAILABLE = False
+else:
+    print("[norm.py] Triton disabled via DISABLE_TRITON environment variable.")
 
 
 class LayerNorm2d(nn.LayerNorm):
@@ -19,9 +37,30 @@ class LayerNorm2d(nn.LayerNorm):
         return out
 
 
-class TritonRMSNorm2d(nn.LayerNorm):
+class RMSNorm2d(nn.LayerNorm):
+    """Pure PyTorch implementation of RMSNorm2d (fallback for Triton)."""
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return TritonRMSNorm2dFunc.apply(x, self.weight, self.bias, self.eps)
+        # x: [B, C, H, W]
+        # RMSNorm: x / sqrt(mean(x^2) + eps) * weight + bias
+        rms = torch.sqrt(torch.mean(x ** 2, dim=1, keepdim=True) + self.eps)
+        out = x / rms
+        if self.elementwise_affine:
+            out = out * self.weight.view(1, -1, 1, 1) + self.bias.view(1, -1, 1, 1)
+        return out
+
+
+class TritonRMSNorm2d(nn.LayerNorm):
+    """RMSNorm2d with Triton acceleration (falls back to PyTorch if unavailable)."""
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if TRITON_AVAILABLE:
+            return TritonRMSNorm2dFunc.apply(x, self.weight, self.bias, self.eps)
+        else:
+            # PyTorch fallback
+            rms = torch.sqrt(torch.mean(x ** 2, dim=1, keepdim=True) + self.eps)
+            out = x / rms
+            if self.elementwise_affine:
+                out = out * self.weight.view(1, -1, 1, 1) + self.bias.view(1, -1, 1, 1)
+            return out
 
 
 # register normalization function here
@@ -30,6 +69,7 @@ REGISTERED_NORM_DICT: dict[str, type] = {
     "ln": nn.LayerNorm,
     "ln2d": LayerNorm2d,
     "trms2d": TritonRMSNorm2d,
+    "rms2d": RMSNorm2d,  # Pure PyTorch fallback
 }
 
 
